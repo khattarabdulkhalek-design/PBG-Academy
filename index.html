@@ -870,9 +870,10 @@
             <div id="backup-status" style="margin-top: 10px; padding: 15px; background: #f8f9fa; border-radius: 8px; display:none;"></div>
 
             <div class="info-box">
-                <h4>ℹ️ Why is my data empty on another device?</h4>
-                <p>This app stores data in your browser's local storage, which is <strong>device-specific</strong>. To use your data on another device or browser, you need to first <strong>Save to Cloud</strong> on your main device, then click <strong>Load from Cloud</strong> on the new device.</p>
-                <p><strong>Tip:</strong> Click "Save to Cloud" regularly after adding sessions or clients so your data is always backed up.</p>
+                <h4>ℹ️ How cloud sync works</h4>
+                <p>Your data is saved in this browser only. <strong>Save to Cloud</strong> sends it to your Google Sheet. <strong>Load from Cloud</strong> reads it back on any device.</p>
+                <p><strong>First time on a new device?</strong> Click Load from Cloud — it will ask for your Spreadsheet ID once, then remember it.</p>
+                <p><strong>Tip:</strong> Click Save to Cloud regularly so your backup is always up to date.</p>
             </div>
         </div>
     </div>
@@ -3266,73 +3267,140 @@
         // ── Google Sheets URL (single source of truth) ──
         const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbzM7wMHIIOgwjJHf4i4GJmNpe06_LDJf0z9Y3fN9mTCC7rQdowC0gnUy0Q-4Ut84QvT/exec';
 
+        // ── Load from Google Sheets via public Sheets API (no CORS issues) ──
         async function loadFromGoogleSheets() {
             const statusDiv = document.getElementById('backup-status');
             statusDiv.style.display = 'block';
-            statusDiv.innerHTML = '<p style="color:#17a2b8;">⏳ Loading data from Google Sheets...</p>';
 
+            // Check if spreadsheet ID is saved
+            const sheetId = localStorage.getItem('pbg_sheetId');
+            if (!sheetId) {
+                showSheetIdSetup(statusDiv);
+                return;
+            }
+            await fetchFromSheet(sheetId, statusDiv);
+        }
+
+        function showSheetIdSetup(statusDiv) {
+            statusDiv.innerHTML = `
+                <div style="background:#fff8e1; border:1px solid #ffc107; border-radius:10px; padding:20px;">
+                    <p style="font-weight:600; font-size:15px; margin-bottom:10px;">⚙️ One-time setup — enter your Google Spreadsheet ID</p>
+                    <p style="font-size:13px; color:#555; margin-bottom:6px;">
+                        Open your Google Sheet. Look at the URL in the browser — it looks like this:<br>
+                        <code style="background:#f5f5f5; padding:3px 6px; border-radius:4px; font-size:12px;">
+                        docs.google.com/spreadsheets/d/<strong style="color:#667eea;">THIS_IS_YOUR_ID</strong>/edit
+                        </code>
+                    </p>
+                    <p style="font-size:13px; color:#555; margin-bottom:12px;">
+                        Copy the bold part and paste it below:
+                    </p>
+                    <input id="pbg-sheet-id-input" type="text"
+                        placeholder="e.g. 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+                        style="width:100%; padding:11px; border:1px solid #ddd; border-radius:8px;
+                               font-size:13px; margin-bottom:12px; box-sizing:border-box;">
+                    <button onclick="saveSheetIdAndLoad()" class="btn">✅ Save & Load My Data</button>
+                    <button onclick="document.getElementById('backup-status').style.display='none'"
+                        class="btn btn-secondary" style="margin-left:8px;">Cancel</button>
+                    <p style="font-size:12px; color:#888; margin-top:14px;">
+                        ⚠️ Also make sure your Google Sheet is shared as <strong>"Anyone with the link can view"</strong>
+                        (Share button → Change to Anyone with the link → Viewer). This is read-only and safe.
+                    </p>
+                </div>
+            `;
+        }
+
+        function saveSheetIdAndLoad() {
+            const input = document.getElementById('pbg-sheet-id-input');
+            const id = input ? input.value.trim() : '';
+            if (!id) { showToast('Please paste your Spreadsheet ID first', 'error'); return; }
+            localStorage.setItem('pbg_sheetId', id);
+            const statusDiv = document.getElementById('backup-status');
+            fetchFromSheet(id, statusDiv);
+        }
+
+        async function fetchFromSheet(sheetId, statusDiv) {
+            statusDiv.innerHTML = '<p style="color:#17a2b8;">⏳ Loading your data from Google Sheets...</p>';
             try {
-                const response = await fetch(SHEETS_URL + '?action=getData', {
-                    method: 'GET',
-                    mode: 'cors'
-                });
+                // Use Google Sheets public visualization API — no CORS issues
+                const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=_BACKUP`;
+                const response = await fetch(url, { cache: 'no-cache' });
+                const raw = await response.text();
 
-                if (!response.ok) throw new Error('Network error: ' + response.status);
+                // Google wraps the JSON in: /*O_o*/\ngoogle.visualization.Query.setResponse({...});
+                const start = raw.indexOf('{');
+                const end   = raw.lastIndexOf('}');
 
-                const text = await response.text();
-                let parsed;
-
-                try {
-                    parsed = JSON.parse(text);
-                } catch(e) {
-                    throw new Error('Could not read data from Google Sheets. Make sure you have updated your Google Apps Script (see instructions below).');
+                if (start === -1) {
+                    // Likely means sheet isn't shared publicly
+                    localStorage.removeItem('pbg_sheetId');
+                    throw new Error(
+                        'Could not read your Google Sheet. Please make sure it is shared as <strong>"Anyone with the link can view"</strong>.<br><br>' +
+                        'In your Google Sheet: click <strong>Share</strong> → <strong>Change to Anyone with the link</strong> → set to <strong>Viewer</strong> → Done.'
+                    );
                 }
 
-                if (!parsed || (!parsed.sessions && !parsed.clients)) {
-                    throw new Error('No data found in Google Sheets. Make sure you have clicked "Save to Cloud" from your main device first.');
+                const gviz   = JSON.parse(raw.substring(start, end + 1));
+                const rows   = gviz && gviz.table && gviz.table.rows;
+
+                if (!rows || rows.length === 0 || !rows[0].c || !rows[0].c[0] || !rows[0].c[0].v) {
+                    throw new Error(
+                        'The backup sheet is empty. Please go to the <strong>Backups tab</strong> on your main device and click <strong>⬆️ Save to Cloud</strong> first.'
+                    );
                 }
 
-                // Merge with defaults to avoid missing keys
-                const restored = {
-                    sessions: parsed.sessions || [],
-                    clients: parsed.clients || [],
-                    packages: parsed.packages || [],
-                    coaches: parsed.coaches || [],
-                    courts: parsed.courts || [],
-                    memberships: parsed.memberships || [],
-                    expenses: parsed.expenses || [],
-                    clientPackages: parsed.clientPackages || [],
+                const jsonStr = rows[0].c[0].v;
+                const parsed  = JSON.parse(jsonStr);
+
+                if (!parsed.sessions && !parsed.clients && !parsed.coaches) {
+                    throw new Error('Backup data appears empty. Please Save to Cloud from your main device first.');
+                }
+
+                // Restore all data
+                data = {
+                    sessions:          parsed.sessions          || [],
+                    clients:           parsed.clients           || [],
+                    packages:          parsed.packages          || [],
+                    coaches:           parsed.coaches           || [],
+                    courts:            parsed.courts            || [],
+                    memberships:       parsed.memberships       || [],
+                    expenses:          parsed.expenses          || [],
+                    clientPackages:    parsed.clientPackages    || [],
                     clientMemberships: parsed.clientMemberships || []
                 };
 
-                data = restored;
                 localStorage.setItem('padelAcademyData', JSON.stringify(data));
                 saveData();
 
-                const sessionCount = data.sessions.length;
-                const clientCount = data.clients.length;
+                const s = data.sessions.length;
+                const c = data.clients.length;
 
                 statusDiv.innerHTML = `
-                    <p style="color:green;">✅ Data loaded from Google Sheets successfully!</p>
-                    <p style="font-size:13px; color:#555;">
-                        Sessions: ${sessionCount} | Clients: ${clientCount} |
-                        Coaches: ${data.coaches.length} | Courts: ${data.courts.length}
+                    <p style="color:green; font-size:15px; font-weight:600;">✅ Data loaded successfully!</p>
+                    <p style="font-size:13px; color:#555; margin-top:6px;">
+                        Sessions: <strong>${s}</strong> &nbsp;|&nbsp;
+                        Clients: <strong>${c}</strong> &nbsp;|&nbsp;
+                        Coaches: <strong>${data.coaches.length}</strong> &nbsp;|&nbsp;
+                        Courts: <strong>${data.courts.length}</strong>
                     </p>
-                    <p style="font-size:12px; color:#888;">Loaded: ${new Date().toLocaleString()}</p>
+                    <p style="font-size:12px; color:#888; margin-top:4px;">Loaded: ${new Date().toLocaleString()}</p>
+                    <button onclick="localStorage.removeItem('pbg_sheetId'); showToast('Sheet ID cleared','info');"
+                        class="btn btn-secondary" style="margin-top:10px; font-size:12px; padding:6px 12px;">
+                        🔄 Use a different spreadsheet
+                    </button>
                 `;
-                showToast(`Data loaded! ${sessionCount} sessions, ${clientCount} clients ✅`);
+                showToast(`✅ Loaded! ${s} sessions & ${c} clients`);
 
             } catch(error) {
                 console.error('Load error:', error);
                 statusDiv.innerHTML = `
-                    <p style="color:red;">❌ Could not load from Google Sheets</p>
-                    <p style="font-size:13px; color:#666;">${error.message}</p>
-                    <p style="font-size:12px; color:#888; margin-top:8px;">
-                        <strong>Fix:</strong> Make sure you updated your Google Apps Script with the new code
-                        (see the instructions file that came with this update).
-                    </p>
+                    <p style="color:red; font-weight:600; font-size:15px;">❌ Could not load data</p>
+                    <p style="font-size:13px; color:#555; margin-top:8px;">${error.message}</p>
+                    <button onclick="localStorage.removeItem('pbg_sheetId'); loadFromGoogleSheets();"
+                        class="btn btn-secondary" style="margin-top:12px; font-size:13px;">
+                        🔄 Try a different Spreadsheet ID
+                    </button>
                 `;
-                showToast('Could not load from cloud — check the Backups tab for details', 'error');
+                showToast('Could not load — see Backups tab for details', 'error');
             }
         }
 
