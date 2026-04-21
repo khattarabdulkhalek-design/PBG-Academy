@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1947,11 +1946,15 @@
         function renderSessionsTable() {
             const tbody = document.querySelector('#sessions-table tbody');
             tbody.innerHTML = '';
-            
+
             data.sessions.forEach(session => {
                 const court = data.courts.find(c => c.id === session.courtId);
                 const coach = data.coaches.find(c => c.id === session.coachId);
                 const client = data.clients.find(c => c.id === session.clientId);
+                // Use fallback names when ID lookup fails (e.g. after cloud load with old sheet format)
+                const courtDisplay  = court  ? court.name  : (session._courtName  || '');
+                const coachDisplay  = coach  ? coach.name  : (session._coachName  || '');
+                const clientDisplay = client ? client.name : (session._clientName || '');
 
                 let paymentInfo = '';
                 if (session.clientMembershipId) {
@@ -1976,9 +1979,9 @@
                     <tr>
                         <td>${session.date}</td>
                         <td>${session.startTime} - ${session.endTime}</td>
-                        <td>${court ? court.name : ''}</td>
-                        <td>${coach ? coach.name : ''}</td>
-                        <td>${client ? client.name : ''}${paymentInfo}</td>
+                        <td>${courtDisplay}</td>
+                        <td>${coachDisplay}</td>
+                        <td>${clientDisplay}${paymentInfo}</td>
                         <td>${statusBadge}</td>
                         <td>${payBadge}</td>
                         <td>${session.hours.toFixed(1)}</td>
@@ -3268,12 +3271,58 @@
         // ── Google Sheets URL (single source of truth) ──
         const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbzM7wMHIIOgwjJHf4i4GJmNpe06_LDJf0z9Y3fN9mTCC7rQdowC0gnUy0Q-4Ut84QvT/exec';
 
-        // ── Load from Google Sheets via public Sheets API (no CORS issues) ──
+        // ── JSONP loader — bypasses CORS, returns full JSON backup ──
+        function loadViaJSONP(url) {
+            return new Promise((resolve, reject) => {
+                const cbName = 'pbg_cb_' + Date.now();
+                const script = document.createElement('script');
+                const timer = setTimeout(() => {
+                    cleanup(); reject(new Error('timeout'));
+                }, 12000);
+                function cleanup() { clearTimeout(timer); delete window[cbName]; if (script.parentNode) script.parentNode.removeChild(script); }
+                window[cbName] = function(d) { cleanup(); resolve(d); };
+                script.onerror = function() { cleanup(); reject(new Error('script error')); };
+                script.src = url + '?callback=' + cbName + '&t=' + Date.now();
+                document.head.appendChild(script);
+            });
+        }
+
+        // ── Load from Google Sheets — tries JSONP (full data) first, then gviz fallback ──
         async function loadFromGoogleSheets() {
             const statusDiv = document.getElementById('backup-status');
             statusDiv.style.display = 'block';
+            statusDiv.innerHTML = '<p style="color:#17a2b8;">⏳ Connecting to cloud backup...</p>';
 
-            // Check if spreadsheet ID is saved
+            // ── Method 1: JSONP via Apps Script doGet (full data, no data loss) ──
+            try {
+                statusDiv.innerHTML = '<p style="color:#17a2b8;">⏳ Loading full backup via Apps Script...</p>';
+                const jsonpData = await loadViaJSONP(SHEETS_URL);
+                if (jsonpData && typeof jsonpData === 'object' &&
+                    (Array.isArray(jsonpData.sessions) || Array.isArray(jsonpData.clients))) {
+                    // Merge with defaults for any missing arrays
+                    data = Object.assign(
+                        { sessions:[], clients:[], coaches:[], courts:[], packages:[], memberships:[], expenses:[], clientPackages:[], clientMemberships:[] },
+                        jsonpData
+                    );
+                    localStorage.setItem('padelAcademyData', JSON.stringify(data));
+                    saveData();
+                    const s = data.sessions.length, c = data.clients.length;
+                    statusDiv.innerHTML = `
+                        <p style="color:green;font-size:15px;font-weight:600;">✅ Full backup loaded successfully!</p>
+                        <p style="font-size:13px;color:#555;margin-top:6px;">
+                            Sessions: <strong>${s}</strong> &nbsp;|&nbsp; Clients: <strong>${c}</strong> &nbsp;|&nbsp;
+                            Coaches: <strong>${data.coaches.length}</strong> &nbsp;|&nbsp; Courts: <strong>${data.courts.length}</strong>
+                        </p>
+                        <p style="font-size:12px;color:#888;margin-top:4px;">Loaded: ${new Date().toLocaleString()}</p>`;
+                    showToast('✅ Loaded! ' + s + ' sessions & ' + c + ' clients');
+                    return;
+                }
+            } catch(e) {
+                // JSONP failed (Apps Script not updated yet or network issue) — fall through to gviz
+                console.log('JSONP load failed, trying gviz fallback:', e.message);
+            }
+
+            // ── Method 2: gviz public API (reads individual sheet tabs) ──
             const sheetId = localStorage.getItem('pbg_sheetId');
             if (!sheetId) {
                 showSheetIdSetup(statusDiv);
@@ -3438,14 +3487,39 @@
                     paymentMethod: r['paymentMethod'] || r['Payment Method'] || ''
                 }));
 
-                // Rebuild sessions (match names back to IDs)
+                // ── Helper: case-insensitive name match ──
+                const matchByName = (arr, name) => {
+                    if (!name) return undefined;
+                    const n = name.toString().toLowerCase().trim();
+                    return arr.find(x => (x.name||'').toLowerCase().trim() === n);
+                };
+
+                // Rebuild sessions — handles both old format (clientId col = "c1") and new format (clientName col = "John")
                 const sessions = (sessionRows || []).map((r, i) => {
-                    const clientName = r['clientName'] || r['Client'] || '';
-                    const coachName  = r['coachName']  || r['Coach']  || '';
-                    const courtName  = r['courtName']  || r['Court']  || '';
-                    const client = clients.find(c => c.name === clientName);
-                    const coach  = coaches.find(c => c.name === coachName);
-                    const court  = courts.find(c  => c.name === courtName);
+                    // New format: sheet has clientName column with actual names
+                    // Old format: sheet has clientName column but it contains IDs like "c1"
+                    let rawClientName = r['clientName'] || r['Client'] || r['client'] || '';
+                    let rawCoachName  = r['coachName']  || r['Coach']  || r['coach']  || '';
+                    let rawCourtName  = r['courtName']  || r['Court']  || r['court']  || '';
+
+                    // Detect if the "name" column actually contains an ID (e.g. "c1", "ch2", "ct3")
+                    // If so, look up the real name from the rebuilt arrays
+                    if (/^c\d+$/.test(rawClientName)) {
+                        const c = clients.find(x => x.id === rawClientName);
+                        rawClientName = c ? c.name : rawClientName;
+                    }
+                    if (/^ch\d+$/.test(rawCoachName)) {
+                        const c = coaches.find(x => x.id === rawCoachName);
+                        rawCoachName = c ? c.name : rawCoachName;
+                    }
+                    if (/^ct\d+$/.test(rawCourtName)) {
+                        const c = courts.find(x => x.id === rawCourtName);
+                        rawCourtName = c ? c.name : rawCourtName;
+                    }
+
+                    const client = matchByName(clients, rawClientName);
+                    const coach  = matchByName(coaches, rawCoachName);
+                    const court  = matchByName(courts,  rawCourtName);
                     const hours   = parseFloat(r['hours']            || r['Hours'])            || 0;
                     const revenue = parseFloat(r['revenue']          || r['Revenue (AED)'])    || 0;
                     const profit  = parseFloat(r['profit']           || r['Profit (AED)'])     || 0;
@@ -3459,6 +3533,10 @@
                         courtId:       court  ? court.id  : '',
                         coachId:       coach  ? coach.id  : '',
                         clientId:      client ? client.id : '',
+                        // Fallback display names — used by render functions if ID lookup fails
+                        _clientName:   rawClientName,
+                        _coachName:    rawCoachName,
+                        _courtName:    rawCourtName,
                         status:        r['status']        || r['Status']         || 'Completed',
                         paymentStatus: r['paymentStatus'] || r['Payment Status'] || 'Paid',
                         paymentMethod: r['paymentMethod'] || r['Payment Method'] || '',
