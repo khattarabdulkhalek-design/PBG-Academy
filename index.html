@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -32,6 +31,9 @@
             color: white;
             padding: 20px 0;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
 
         header h1 {
@@ -43,10 +45,19 @@
             display: flex;
             gap: 10px;
             margin: 20px 0;
-            flex-wrap: wrap;
+            flex-wrap: nowrap;
+            overflow-x: auto;
             border-bottom: 2px solid #e0e0e0;
             padding-bottom: 10px;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+            position: sticky;
+            top: 68px;
+            z-index: 99;
+            background: #f5f7fa;
+            padding-top: 10px;
         }
+        .tabs::-webkit-scrollbar { display: none; }
 
         .tab {
             padding: 12px 24px;
@@ -379,12 +390,118 @@
             border-radius: 4px;
             border-left: 4px solid #ffc107;
         }
+
+        /* ── Badge Pills ── */
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .badge-scheduled  { background:#e3f2fd; color:#1565c0; }
+        .badge-completed  { background:#e8f5e9; color:#2e7d32; }
+        .badge-canceled   { background:#ffebee; color:#c62828; }
+        .badge-noshow     { background:#fff8e1; color:#f57f17; }
+        .badge-paid       { background:#e8f5e9; color:#2e7d32; }
+        .badge-pending    { background:#fff8e1; color:#f57f17; }
+
+        /* ── Toast Notifications ── */
+        #toast-container {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .toast {
+            padding: 14px 20px;
+            border-radius: 10px;
+            color: white;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            animation: toastIn 0.3s ease;
+            min-width: 260px;
+            max-width: 360px;
+        }
+        .toast.success { background: linear-gradient(135deg,#28a745,#20863a); }
+        .toast.error   { background: linear-gradient(135deg,#dc3545,#b02a37); }
+        .toast.info    { background: linear-gradient(135deg,#667eea,#764ba2); }
+        @keyframes toastIn {
+            from { transform: translateX(80px); opacity: 0; }
+            to   { transform: translateX(0);    opacity: 1; }
+        }
+
+        /* ── Search Box ── */
+        .search-box {
+            width: 100%;
+            max-width: 320px;
+            padding: 10px 14px;
+            border: 1px solid #ddd;
+            border-radius: 25px;
+            font-size: 14px;
+            margin-bottom: 15px;
+            outline: none;
+            transition: border 0.3s, box-shadow 0.3s;
+        }
+        .search-box:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102,126,234,0.15);
+        }
+
+        /* ── Responsive Tables ── */
+        .table-wrapper { overflow-x: auto; }
+
+        /* ── Dark Mode ── */
+        body.dark-mode { background:#1a1a2e; color:#e0e0e0; }
+        body.dark-mode .tab-content,
+        body.dark-mode .modal-content { background:#16213e; color:#e0e0e0; }
+        body.dark-mode .tab { background:#0f3460; color:#ccc; }
+        body.dark-mode .tab.active { background:linear-gradient(135deg,#667eea,#764ba2); color:white; }
+        body.dark-mode th { background:#0f3460; color:#ccc; }
+        body.dark-mode tr:hover { background:#1a2a50; }
+        body.dark-mode input,
+        body.dark-mode select,
+        body.dark-mode textarea { background:#0f3460; color:#e0e0e0; border-color:#3a4a70; }
+        body.dark-mode .filters,
+        body.dark-mode .chart-container { background:#0f3460; }
+        body.dark-mode .notification-panel { background:#0f3460; border-color:#3a4a70; }
+        body.dark-mode .notification-item { background:#16213e; }
+        body.dark-mode .tabs { background:#1a1a2e; }
+        body.dark-mode .info-box { background:#0f3460; border-color:#667eea; }
+        body.dark-mode #backup-status { background:#0f3460; }
+        .dark-toggle-btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.4);
+            color: white;
+            padding: 7px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: background 0.3s;
+            white-space: nowrap;
+        }
+        .dark-toggle-btn:hover { background: rgba(255,255,255,0.35); }
+
+        /* ── Empty State ── */
+        .empty-state {
+            text-align: center;
+            padding: 50px 20px;
+            color: #aaa;
+        }
+        .empty-state .empty-icon { font-size: 48px; margin-bottom: 12px; }
+        .empty-state p { font-size: 15px; }
     </style>
 </head>
 <body>
     <header>
-        <div class="container">
-            <h1>🎾 Padel Academy Training Management</h1>
+        <div class="container" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+            <h1>🎾 PBG Padel Academy</h1>
+            <button class="dark-toggle-btn" onclick="toggleDarkMode()" id="dark-btn">🌙 Dark Mode</button>
         </div>
     </header>
 
@@ -489,6 +606,8 @@
                 <button class="btn btn-success" onclick="exportToExcel('sessions')">Export Excel</button>
                 <button class="btn btn-secondary" onclick="exportToPDF('sessions')">Export PDF</button>
             </div>
+            <input type="text" class="search-box" placeholder="🔍 Search sessions..." oninput="filterTable('sessions-table', this.value)">
+            <div class="table-wrapper">
             <table id="sessions-table">
                 <thead>
                     <tr>
@@ -507,6 +626,7 @@
                 </thead>
                 <tbody></tbody>
             </table>
+            </div>
         </div>
 
         <!-- Clients -->
@@ -517,6 +637,8 @@
                 <button class="btn btn-success" onclick="exportToExcel('clients')">Export Excel</button>
                 <button class="btn btn-secondary" onclick="exportToPDF('clients')">Export PDF</button>
             </div>
+            <input type="text" class="search-box" placeholder="🔍 Search clients..." oninput="filterTable('clients-table', this.value)">
+            <div class="table-wrapper">
             <table id="clients-table">
                 <thead>
                     <tr>
@@ -534,6 +656,7 @@
                 </thead>
                 <tbody></tbody>
             </table>
+            </div>
         </div>
 
         <!-- Memberships -->
@@ -588,6 +711,8 @@
                 <button class="btn btn-success" onclick="exportToExcel('coaches')">Export Excel</button>
                 <button class="btn btn-secondary" onclick="exportToPDF('coaches')">Export PDF</button>
             </div>
+            <input type="text" class="search-box" placeholder="🔍 Search coaches..." oninput="filterTable('coaches-table', this.value)">
+            <div class="table-wrapper">
             <table id="coaches-table">
                 <thead>
                     <tr>
@@ -602,6 +727,7 @@
                 </thead>
                 <tbody></tbody>
             </table>
+            </div>
         </div>
 
         <!-- Courts -->
@@ -612,6 +738,8 @@
                 <button class="btn btn-success" onclick="exportToExcel('courts')">Export Excel</button>
                 <button class="btn btn-secondary" onclick="exportToPDF('courts')">Export PDF</button>
             </div>
+            <input type="text" class="search-box" placeholder="🔍 Search courts..." oninput="filterTable('courts-table', this.value)">
+            <div class="table-wrapper">
             <table id="courts-table">
                 <thead>
                     <tr>
@@ -625,6 +753,7 @@
                 </thead>
                 <tbody></tbody>
             </table>
+            </div>
         </div>
 
         <!-- Expenses -->
@@ -634,6 +763,8 @@
                 <button class="btn" onclick="openExpenseModal()">+ Add Expense</button>
                 <button class="btn btn-success" onclick="exportToExcel('expenses')">Export Excel</button>
             </div>
+            <input type="text" class="search-box" placeholder="🔍 Search expenses..." oninput="filterTable('expenses-table', this.value)">
+            <div class="table-wrapper">
             <table id="expenses-table">
                 <thead>
                     <tr>
@@ -648,6 +779,7 @@
                 </thead>
                 <tbody></tbody>
             </table>
+            </div>
         </div>
 
         <!-- Reporting -->
@@ -711,29 +843,36 @@
 
         <!-- Backups -->
         <div id="backups" class="tab-content">
-            <h2>Backups & Sync</h2>
-            <p>Export all system data to a JSON file, sync to Google Sheets, or restore from a backup.</p>
-            <div style="margin-top: 20px;">
-                <button class="btn" onclick="backupData()">💾 Backup to File</button>
-                <button class="btn btn-success" onclick="syncToGoogleSheets()">☁️ Sync to Google Sheets</button>
-                <button class="btn btn-secondary" onclick="document.getElementById('restore-file').click()">📁 Restore from Backup</button>
-                <input type="file" id="restore-file" accept=".json" style="display: none;" onchange="restoreData(event)">
+            <h2>☁️ Backups & Cloud Sync</h2>
+            <p style="color:#666; margin-bottom:20px;">Your data lives in this browser. Use <strong>Sync to Google Sheets</strong> to save to the cloud, and <strong>Load from Cloud</strong> to restore it on any device.</p>
+
+            <div style="background:#f0f4ff; border:1px solid #c7d3ff; border-radius:10px; padding:18px; margin-bottom:24px;">
+                <h3 style="margin-bottom:12px; color:#667eea;">🔄 Cloud Sync (Google Sheets)</h3>
+                <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                    <button class="btn btn-success" onclick="syncToGoogleSheets()">⬆️ Save to Cloud</button>
+                    <button class="btn" style="background:linear-gradient(135deg,#17a2b8,#138496);" onclick="loadFromGoogleSheets()">⬇️ Load from Cloud</button>
+                </div>
+                <p style="font-size:13px; color:#555; margin-top:12px;">
+                    <strong>Save to Cloud</strong> — pushes all your current data to Google Sheets.<br>
+                    <strong>Load from Cloud</strong> — pulls the latest saved data back (use this on a new device).
+                </p>
             </div>
-            <div id="backup-status" style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;"></div>
-            
+
+            <div style="background:#f8f9fa; border-radius:10px; padding:18px; margin-bottom:24px;">
+                <h3 style="margin-bottom:12px; color:#555;">💾 Local Backup / Restore</h3>
+                <div style="display:flex; flex-wrap:wrap; gap:10px;">
+                    <button class="btn btn-secondary" onclick="backupData()">💾 Download Backup File</button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('restore-file').click()">📁 Restore from File</button>
+                    <input type="file" id="restore-file" accept=".json" style="display: none;" onchange="restoreData(event)">
+                </div>
+            </div>
+
+            <div id="backup-status" style="margin-top: 10px; padding: 15px; background: #f8f9fa; border-radius: 8px; display:none;"></div>
+
             <div class="info-box">
-                <h4>ℹ️ About Google Sheets Sync</h4>
-                <p>
-                    Clicking "Sync to Google Sheets" will send your current data to your connected Google Sheets spreadsheet. 
-                    This creates a cloud backup that you can access from anywhere.
-                </p>
-                <p>
-                    <strong>What gets synced:</strong> All sessions, clients, coaches, courts, packages, memberships, expenses, and client package assignments.
-                </p>
-                <p>
-                    <strong>Sync frequency:</strong> Click the button whenever you want to backup your data to the cloud. 
-                    For best results, sync regularly after making important changes.
-                </p>
+                <h4>ℹ️ Why is my data empty on another device?</h4>
+                <p>This app stores data in your browser's local storage, which is <strong>device-specific</strong>. To use your data on another device or browser, you need to first <strong>Save to Cloud</strong> on your main device, then click <strong>Load from Cloud</strong> on the new device.</p>
+                <p><strong>Tip:</strong> Click "Save to Cloud" regularly after adding sessions or clients so your data is always backed up.</p>
             </div>
         </div>
     </div>
@@ -1215,7 +1354,39 @@
         </div>
     </div>
 
+    <div id="toast-container"></div>
+
     <script>
+        // ── Toast Notification ──
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.transition = 'opacity 0.4s';
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 400);
+            }, 3200);
+        }
+
+        // ── Dark Mode ──
+        function toggleDarkMode() {
+            const isDark = document.body.classList.toggle('dark-mode');
+            localStorage.setItem('pbg_darkMode', isDark);
+            document.getElementById('dark-btn').textContent = isDark ? '☀️ Light Mode' : '🌙 Dark Mode';
+        }
+
+        // ── Table Search Filter ──
+        function filterTable(tableId, query) {
+            const rows = document.querySelectorAll(`#${tableId} tbody tr`);
+            const q = query.toLowerCase().trim();
+            rows.forEach(row => {
+                row.style.display = !q || row.textContent.toLowerCase().includes(q) ? '' : 'none';
+            });
+        }
+
         // Data Storage
         let data = {
             sessions: [],
@@ -1235,13 +1406,65 @@
 
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
+            // Restore dark mode
+            if (localStorage.getItem('pbg_darkMode') === 'true') {
+                document.body.classList.add('dark-mode');
+                document.getElementById('dark-btn').textContent = '☀️ Light Mode';
+            }
             loadData();
             updateDashboard();
             renderCalendar();
             setupForms();
             setupEventListeners();
             checkNotifications();
+
+            // ── Auto-detect: if no local data exists, show cloud-load banner ──
+            const stored = localStorage.getItem('padelAcademyData');
+            const isEmpty = !stored || (function() {
+                try {
+                    const d = JSON.parse(stored);
+                    return !d.sessions?.length && !d.clients?.length && !d.coaches?.length;
+                } catch(e) { return true; }
+            })();
+
+            if (isEmpty) {
+                showCloudLoadBanner();
+            }
         });
+
+        function showCloudLoadBanner() {
+            const banner = document.createElement('div');
+            banner.id = 'cloud-banner';
+            banner.style.cssText = `
+                position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
+                background: linear-gradient(135deg, #667eea, #764ba2);
+                color: white; padding: 16px 24px;
+                display: flex; align-items: center; justify-content: space-between;
+                flex-wrap: wrap; gap: 12px;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            `;
+            banner.innerHTML = `
+                <div>
+                    <strong>📱 No local data found</strong>
+                    <span style="opacity:0.9; font-size:14px; margin-left:10px;">
+                        Opening on a new device? Load your data from Google Sheets.
+                    </span>
+                </div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button onclick="loadFromGoogleSheets(); document.getElementById('cloud-banner').remove();"
+                        style="background:white; color:#667eea; border:none; padding:9px 18px;
+                               border-radius:20px; cursor:pointer; font-weight:600; font-size:14px;">
+                        ⬇️ Load from Cloud
+                    </button>
+                    <button onclick="document.getElementById('cloud-banner').remove();"
+                        style="background:rgba(255,255,255,0.2); color:white; border:1px solid rgba(255,255,255,0.5);
+                               padding:9px 18px; border-radius:20px; cursor:pointer; font-size:14px;">
+                        Start fresh
+                    </button>
+                </div>
+            `;
+            document.body.prepend(banner);
+        }
 
         function setupEventListeners() {
             const clientSelect = document.getElementById('session-client-single');
@@ -1478,7 +1701,7 @@
             saveData();
             closeModal('assign-package-modal');
             renderClientsTable();
-            alert(`Package "${pkg.name}" successfully assigned to client!`);
+            showToast(`Package "${pkg.name}" assigned successfully! ✅`);
         }
 
         function saveAssignMembership(e) {
@@ -1508,7 +1731,7 @@
             saveData();
             closeModal('assign-membership-modal');
             renderClientsTable();
-            alert(`Membership "${membership.type}" successfully assigned to client!`);
+            showToast(`Membership "${membership.type}" assigned successfully! ✅`);
         }
 
         function openSessionModal(id = null) {
@@ -1604,7 +1827,7 @@
             const clientId = document.getElementById('session-client-single').value;
             
             if (!clientId) {
-                alert('Please select a client');
+                showToast('Please select a client', 'error');
                 return;
             }
             
@@ -1613,7 +1836,7 @@
             if (status === 'Canceled') {
                 const cancellationReason = document.getElementById('session-cancellation-reason').value;
                 if (!cancellationReason) {
-                    alert('Please select a cancellation reason');
+                    showToast('Please select a cancellation reason', 'error');
                     return;
                 }
             }
@@ -1716,6 +1939,7 @@
             saveData();
             closeModal('session-modal');
             renderSessionsTable();
+            showToast('Session saved! ✅');
         }
 
         function renderSessionsTable() {
@@ -1742,13 +1966,9 @@
                     }
                 }
 
-                const paymentStatusIcon = session.paymentStatus === 'Paid' ? '✓' : '⏳';
-                const paymentClass = session.paymentStatus === 'Paid' ? 'payment-paid' : 'payment-pending';
-                
-                let statusDisplay = session.status;
-                if (session.status === 'Canceled' && session.cancellationReason) {
-                    statusDisplay += ` <span style="font-size: 10px; color: #999;">(${session.cancellationReason})</span>`;
-                }
+                const statusKey = session.status.toLowerCase().replace('-','');
+                const statusBadge = `<span class="badge badge-${statusKey}">${session.status}${session.status==='Canceled'&&session.cancellationReason?' <small>('+session.cancellationReason+')</small>':''}</span>`;
+                const payBadge = `<span class="badge badge-${(session.paymentStatus||'Pending').toLowerCase()}">${session.paymentStatus==='Paid'?'✓ Paid':'⏳ Pending'}</span>`;
 
                 const row = `
                     <tr>
@@ -1757,8 +1977,8 @@
                         <td>${court ? court.name : ''}</td>
                         <td>${coach ? coach.name : ''}</td>
                         <td>${client ? client.name : ''}${paymentInfo}</td>
-                        <td class="status-${session.status.toLowerCase().replace('-', '')}">${statusDisplay}</td>
-                        <td class="${paymentClass}">${paymentStatusIcon} ${session.paymentStatus || 'Pending'}</td>
+                        <td>${statusBadge}</td>
+                        <td>${payBadge}</td>
                         <td>${session.hours.toFixed(1)}</td>
                         <td>${session.revenue.toFixed(2)}</td>
                         <td>${session.profit.toFixed(2)}</td>
@@ -1851,8 +2071,7 @@
             saveData();
             closeModal('client-modal');
             renderClientsTable();
-            
-            alert(`Client "${clientData.name}" saved successfully!`);
+            showToast(`Client "${clientData.name}" saved! ✅`);
         }
 
         function renderClientsTable() {
@@ -2090,6 +2309,7 @@
             saveData();
             closeModal('coach-modal');
             renderCoachesTable();
+            showToast('Coach saved! ✅');
         }
 
         function renderCoachesTable() {
@@ -2160,6 +2380,7 @@
             saveData();
             closeModal('court-modal');
             renderCourtsTable();
+            showToast('Court saved! ✅');
         }
 
         function renderCourtsTable() {
@@ -2229,6 +2450,7 @@
             saveData();
             closeModal('expense-modal');
             renderExpensesTable();
+            showToast('Expense saved! ✅');
         }
 
         function renderExpensesTable() {
@@ -3022,7 +3244,8 @@
         }
 
         function exportToPDF(type) {
-            alert('PDF export functionality requires jsPDF library. For now, use Excel export or print to PDF from your browser.');
+            showToast('Tip: Use Ctrl+P → Save as PDF to export this page 📄', 'info');
+            window.print();
         }
 
         function backupData() {
@@ -3040,8 +3263,82 @@
             `;
         }
 
+        // ── Google Sheets URL (single source of truth) ──
+        const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbzM7wMHIIOgwjJHf4i4GJmNpe06_LDJf0z9Y3fN9mTCC7rQdowC0gnUy0Q-4Ut84QvT/exec';
+
+        async function loadFromGoogleSheets() {
+            const statusDiv = document.getElementById('backup-status');
+            statusDiv.style.display = 'block';
+            statusDiv.innerHTML = '<p style="color:#17a2b8;">⏳ Loading data from Google Sheets...</p>';
+
+            try {
+                const response = await fetch(SHEETS_URL + '?action=getData', {
+                    method: 'GET',
+                    mode: 'cors'
+                });
+
+                if (!response.ok) throw new Error('Network error: ' + response.status);
+
+                const text = await response.text();
+                let parsed;
+
+                try {
+                    parsed = JSON.parse(text);
+                } catch(e) {
+                    throw new Error('Could not read data from Google Sheets. Make sure you have updated your Google Apps Script (see instructions below).');
+                }
+
+                if (!parsed || (!parsed.sessions && !parsed.clients)) {
+                    throw new Error('No data found in Google Sheets. Make sure you have clicked "Save to Cloud" from your main device first.');
+                }
+
+                // Merge with defaults to avoid missing keys
+                const restored = {
+                    sessions: parsed.sessions || [],
+                    clients: parsed.clients || [],
+                    packages: parsed.packages || [],
+                    coaches: parsed.coaches || [],
+                    courts: parsed.courts || [],
+                    memberships: parsed.memberships || [],
+                    expenses: parsed.expenses || [],
+                    clientPackages: parsed.clientPackages || [],
+                    clientMemberships: parsed.clientMemberships || []
+                };
+
+                data = restored;
+                localStorage.setItem('padelAcademyData', JSON.stringify(data));
+                saveData();
+
+                const sessionCount = data.sessions.length;
+                const clientCount = data.clients.length;
+
+                statusDiv.innerHTML = `
+                    <p style="color:green;">✅ Data loaded from Google Sheets successfully!</p>
+                    <p style="font-size:13px; color:#555;">
+                        Sessions: ${sessionCount} | Clients: ${clientCount} |
+                        Coaches: ${data.coaches.length} | Courts: ${data.courts.length}
+                    </p>
+                    <p style="font-size:12px; color:#888;">Loaded: ${new Date().toLocaleString()}</p>
+                `;
+                showToast(`Data loaded! ${sessionCount} sessions, ${clientCount} clients ✅`);
+
+            } catch(error) {
+                console.error('Load error:', error);
+                statusDiv.innerHTML = `
+                    <p style="color:red;">❌ Could not load from Google Sheets</p>
+                    <p style="font-size:13px; color:#666;">${error.message}</p>
+                    <p style="font-size:12px; color:#888; margin-top:8px;">
+                        <strong>Fix:</strong> Make sure you updated your Google Apps Script with the new code
+                        (see the instructions file that came with this update).
+                    </p>
+                `;
+                showToast('Could not load from cloud — check the Backups tab for details', 'error');
+            }
+        }
+
         async function syncToGoogleSheets() {
             const statusDiv = document.getElementById('backup-status');
+            statusDiv.style.display = 'block';
             statusDiv.innerHTML = '<p style="color: blue;">⏳ Syncing to Google Sheets...</p>';
             
             try {
@@ -3104,7 +3401,7 @@
                     timestamp: new Date().toISOString()
                 };
 
-                const url = 'https://script.google.com/macros/s/AKfycbzM7wMHIIOgwjJHf4i4GJmNpe06_LDJf0z9Y3fN9mTCC7rQdowC0gnUy0Q-4Ut84QvT/exec';
+                const url = SHEETS_URL;
                 
                 const form = document.createElement('form');
                 form.method = 'POST';
