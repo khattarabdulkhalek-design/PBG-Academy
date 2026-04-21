@@ -3318,89 +3318,203 @@
             fetchFromSheet(id, statusDiv);
         }
 
+        // ── Parse a gviz API table response into an array of objects ──
+        function parseGvizTable(gviz) {
+            if (!gviz || !gviz.table || !gviz.table.cols || !gviz.table.rows) return [];
+            const cols = gviz.table.cols.map(c => (c.label || c.id || '').trim());
+            return gviz.table.rows
+                .filter(row => row.c && row.c.some(cell => cell && cell.v !== null && cell.v !== ''))
+                .map(row => {
+                    const obj = {};
+                    row.c.forEach((cell, i) => { if (cols[i]) obj[cols[i]] = (cell && cell.v !== null) ? cell.v : ''; });
+                    return obj;
+                });
+        }
+
+        // ── Fetch one sheet tab via gviz API ──
+        async function fetchSheetTab(sheetId, tabName) {
+            const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(tabName)}`;
+            const response = await fetch(url, { cache: 'no-cache' });
+            const raw = await response.text();
+            if (raw.includes('<html') || raw.includes('accounts.google.com')) return null; // not public
+            const start = raw.indexOf('{'), end = raw.lastIndexOf('}');
+            if (start === -1) return null;
+            const gviz = JSON.parse(raw.substring(start, end + 1));
+            if (gviz.status === 'error') return [];
+            return parseGvizTable(gviz);
+        }
+
         async function fetchFromSheet(sheetId, statusDiv) {
-            statusDiv.innerHTML = '<p style="color:#17a2b8;">⏳ Loading your data from Google Sheets...</p>';
+            statusDiv.innerHTML = '<p style="color:#17a2b8;">⏳ Reading your data from Google Sheets...</p>';
             try {
-                // Use Google Sheets public visualization API — no CORS issues
-                const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=_BACKUP`;
-                const response = await fetch(url, { cache: 'no-cache' });
-                const raw = await response.text();
+                // Test if sheet is public first using Clients tab
+                const testRaw = await fetch(
+                    `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=Clients`,
+                    { cache: 'no-cache' }
+                ).then(r => r.text()).catch(() => '');
 
-                // Google wraps the JSON in: /*O_o*/\ngoogle.visualization.Query.setResponse({...});
-                const start = raw.indexOf('{');
-                const end   = raw.lastIndexOf('}');
-
-                if (start === -1) {
-                    // Likely means sheet isn't shared publicly
+                if (testRaw.includes('<html') || testRaw.includes('accounts.google.com') || testRaw.trim() === '') {
                     localStorage.removeItem('pbg_sheetId');
-                    throw new Error(
-                        'Could not read your Google Sheet. Please make sure it is shared as <strong>"Anyone with the link can view"</strong>.<br><br>' +
-                        'In your Google Sheet: click <strong>Share</strong> → <strong>Change to Anyone with the link</strong> → set to <strong>Viewer</strong> → Done.'
-                    );
+                    throw 'NOT_PUBLIC';
                 }
 
-                const gviz   = JSON.parse(raw.substring(start, end + 1));
-                const rows   = gviz && gviz.table && gviz.table.rows;
+                statusDiv.innerHTML = '<p style="color:#17a2b8;">⏳ Reading Clients, Sessions, Coaches... please wait...</p>';
 
-                if (!rows || rows.length === 0 || !rows[0].c || !rows[0].c[0] || !rows[0].c[0].v) {
-                    throw new Error(
-                        'The backup sheet is empty. Please go to the <strong>Backups tab</strong> on your main device and click <strong>⬆️ Save to Cloud</strong> first.'
-                    );
-                }
+                // Read all sheet tabs in parallel
+                const [clientRows, coachRows, courtRows, sessionRows, packageRows, membershipRows, expenseRows] = await Promise.all([
+                    fetchSheetTab(sheetId, 'Clients'),
+                    fetchSheetTab(sheetId, 'Coaches'),
+                    fetchSheetTab(sheetId, 'Courts'),
+                    fetchSheetTab(sheetId, 'Sessions'),
+                    fetchSheetTab(sheetId, 'Packages'),
+                    fetchSheetTab(sheetId, 'Memberships'),
+                    fetchSheetTab(sheetId, 'Expenses')
+                ]);
 
-                const jsonStr = rows[0].c[0].v;
-                const parsed  = JSON.parse(jsonStr);
+                if (clientRows === null) { localStorage.removeItem('pbg_sheetId'); throw 'NOT_PUBLIC'; }
+                if (!clientRows.length && !coachRows.length && !sessionRows.length) throw 'EMPTY';
 
-                if (!parsed.sessions && !parsed.clients && !parsed.coaches) {
-                    throw new Error('Backup data appears empty. Please Save to Cloud from your main device first.');
-                }
+                // Rebuild clients
+                const clients = clientRows.map((r, i) => ({
+                    id: 'c' + (i + 1),
+                    name:       r['name']        || r['Name']        || '',
+                    phone:      r['phone']       || r['Phone']       || '',
+                    email:      r['email']       || r['Email']       || '',
+                    company:    r['company']     || r['Company']     || '',
+                    dob:        r['dob']         || r['DOB']         || '',
+                    referredBy: r['referredBy']  || r['Referred By'] || '',
+                    notes:      r['notes']       || r['Notes']       || ''
+                }));
 
-                // Restore all data
-                data = {
-                    sessions:          parsed.sessions          || [],
-                    clients:           parsed.clients           || [],
-                    packages:          parsed.packages          || [],
-                    coaches:           parsed.coaches           || [],
-                    courts:            parsed.courts            || [],
-                    memberships:       parsed.memberships       || [],
-                    expenses:          parsed.expenses          || [],
-                    clientPackages:    parsed.clientPackages    || [],
-                    clientMemberships: parsed.clientMemberships || []
-                };
+                // Rebuild coaches
+                const coaches = (coachRows || []).map((r, i) => ({
+                    id: 'ch' + (i + 1),
+                    name:  r['name']  || r['Name']         || '',
+                    phone: r['phone'] || r['Phone']        || '',
+                    email: r['email'] || r['Email']        || '',
+                    rate:  parseFloat(r['rate'] || r['Rate/Hour'] || r['Rate per Hour (AED)']) || 0,
+                    notes: r['notes'] || r['Notes']        || ''
+                }));
 
+                // Rebuild courts
+                const courts = (courtRows || []).map((r, i) => ({
+                    id: 'ct' + (i + 1),
+                    name:    r['name']    || r['Name']       || r['Court Name'] || '',
+                    venue:   r['venue']   || r['Venue']      || '',
+                    emirate: r['emirate'] || r['Emirate']    || '',
+                    address: r['address'] || r['Address']    || '',
+                    cost:    parseFloat(r['cost'] || r['Cost/Hour'] || r['Cost per Hour (AED)']) || 0
+                }));
+
+                // Rebuild packages
+                const packages = (packageRows || []).map((r, i) => ({
+                    id: 'pk' + (i + 1),
+                    name:      r['name']      || r['Name']         || r['Package Name'] || '',
+                    sessions:  parseInt(r['sessions'] || r['Sessions']) || 0,
+                    price:     parseFloat(r['price']  || r['Price (AED)']) || 0,
+                    validDays: parseInt(r['validDays'] || r['Valid Days']) || 0
+                }));
+
+                // Rebuild memberships
+                const memberships = (membershipRows || []).map((r, i) => ({
+                    id: 'mb' + (i + 1),
+                    type:        r['type']        || r['Type']              || '',
+                    price:       parseFloat(r['price']    || r['Price (AED)'])    || 0,
+                    sessions:    parseInt(r['sessions']  || r['Sessions'])        || 0,
+                    hours:       parseFloat(r['hours']    || r['Hours'])           || 0,
+                    duration:    parseInt(r['duration']  || r['Duration (Days)']) || 0,
+                    description: r['description'] || r['Description']       || ''
+                }));
+
+                // Rebuild expenses
+                const expenses = (expenseRows || []).map((r, i) => ({
+                    id: 'ex' + (i + 1),
+                    date:          r['date']          || r['Date']           || '',
+                    category:      r['category']      || r['Category']       || '',
+                    description:   r['description']   || r['Description']    || '',
+                    amount:        parseFloat(r['amount'] || r['Amount (AED)']) || 0,
+                    paymentStatus: r['paymentStatus'] || r['Payment Status'] || 'Paid',
+                    paymentMethod: r['paymentMethod'] || r['Payment Method'] || ''
+                }));
+
+                // Rebuild sessions (match names back to IDs)
+                const sessions = (sessionRows || []).map((r, i) => {
+                    const clientName = r['clientName'] || r['Client'] || '';
+                    const coachName  = r['coachName']  || r['Coach']  || '';
+                    const courtName  = r['courtName']  || r['Court']  || '';
+                    const client = clients.find(c => c.name === clientName);
+                    const coach  = coaches.find(c => c.name === coachName);
+                    const court  = courts.find(c  => c.name === courtName);
+                    const hours   = parseFloat(r['hours']            || r['Hours'])            || 0;
+                    const revenue = parseFloat(r['revenue']          || r['Revenue (AED)'])    || 0;
+                    const profit  = parseFloat(r['profit']           || r['Profit (AED)'])     || 0;
+                    const coachCost = coach ? hours * coach.rate : 0;
+                    const courtCost = court ? hours * court.cost : 0;
+                    return {
+                        id:            's' + (i + 1),
+                        date:          r['date']          || r['Date']           || '',
+                        startTime:     r['startTime']     || r['Start Time']     || '',
+                        endTime:       r['endTime']       || r['End Time']       || '',
+                        courtId:       court  ? court.id  : '',
+                        coachId:       coach  ? coach.id  : '',
+                        clientId:      client ? client.id : '',
+                        status:        r['status']        || r['Status']         || 'Completed',
+                        paymentStatus: r['paymentStatus'] || r['Payment Status'] || 'Paid',
+                        paymentMethod: r['paymentMethod'] || r['Payment Method'] || '',
+                        hours,
+                        revenue,
+                        coachCost,
+                        courtCost,
+                        profit:        profit || (revenue - coachCost - courtCost),
+                        notes:         r['notes']         || r['Notes']          || ''
+                    };
+                });
+
+                data = { sessions, clients, coaches, courts, packages, memberships, expenses, clientPackages: [], clientMemberships: [] };
                 localStorage.setItem('padelAcademyData', JSON.stringify(data));
                 saveData();
 
-                const s = data.sessions.length;
-                const c = data.clients.length;
-
+                const s = sessions.length, c = clients.length;
                 statusDiv.innerHTML = `
-                    <p style="color:green; font-size:15px; font-weight:600;">✅ Data loaded successfully!</p>
-                    <p style="font-size:13px; color:#555; margin-top:6px;">
-                        Sessions: <strong>${s}</strong> &nbsp;|&nbsp;
-                        Clients: <strong>${c}</strong> &nbsp;|&nbsp;
-                        Coaches: <strong>${data.coaches.length}</strong> &nbsp;|&nbsp;
-                        Courts: <strong>${data.courts.length}</strong>
+                    <p style="color:green;font-size:15px;font-weight:600;">✅ Data loaded successfully!</p>
+                    <p style="font-size:13px;color:#555;margin-top:6px;">
+                        Sessions: <strong>${s}</strong> &nbsp;|&nbsp; Clients: <strong>${c}</strong> &nbsp;|&nbsp;
+                        Coaches: <strong>${coaches.length}</strong> &nbsp;|&nbsp; Courts: <strong>${courts.length}</strong>
                     </p>
-                    <p style="font-size:12px; color:#888; margin-top:4px;">Loaded: ${new Date().toLocaleString()}</p>
-                    <button onclick="localStorage.removeItem('pbg_sheetId'); showToast('Sheet ID cleared','info');"
-                        class="btn btn-secondary" style="margin-top:10px; font-size:12px; padding:6px 12px;">
+                    <p style="font-size:12px;color:#888;margin-top:4px;">Loaded: ${new Date().toLocaleString()}</p>
+                    <button onclick="localStorage.removeItem('pbg_sheetId');showToast('Cleared — enter a new Sheet ID next time','info');"
+                        class="btn btn-secondary" style="margin-top:10px;font-size:12px;padding:6px 12px;">
                         🔄 Use a different spreadsheet
-                    </button>
-                `;
+                    </button>`;
                 showToast(`✅ Loaded! ${s} sessions & ${c} clients`);
 
-            } catch(error) {
-                console.error('Load error:', error);
+            } catch(err) {
+                console.error('Load error:', err);
+                const isNotPublic = err === 'NOT_PUBLIC';
+                const isEmpty     = err === 'EMPTY';
                 statusDiv.innerHTML = `
-                    <p style="color:red; font-weight:600; font-size:15px;">❌ Could not load data</p>
-                    <p style="font-size:13px; color:#555; margin-top:8px;">${error.message}</p>
-                    <button onclick="localStorage.removeItem('pbg_sheetId'); loadFromGoogleSheets();"
-                        class="btn btn-secondary" style="margin-top:12px; font-size:13px;">
-                        🔄 Try a different Spreadsheet ID
-                    </button>
-                `;
-                showToast('Could not load — see Backups tab for details', 'error');
+                    <div style="background:#fff5f5;border:1px solid #ffcccc;border-radius:10px;padding:20px;">
+                        ${isNotPublic ? `
+                            <p style="font-weight:600;color:red;font-size:15px;">❌ Google Sheet is not shared publicly</p>
+                            <ol style="font-size:13px;color:#444;line-height:2.2;margin-top:12px;">
+                                <li>Open your Google Sheet</li>
+                                <li>Click the <strong>Share</strong> button (top right)</li>
+                                <li>Click <strong>"Change to anyone with the link"</strong></li>
+                                <li>Make sure it says <strong>Viewer</strong></li>
+                                <li>Click <strong>Done</strong></li>
+                                <li>Then click <strong>Load from Cloud</strong> again</li>
+                            </ol>` : isEmpty ? `
+                            <p style="font-weight:600;color:red;font-size:15px;">❌ No data found in Google Sheet</p>
+                            <p style="font-size:13px;color:#444;margin-top:10px;">Make sure you clicked <strong>Save to Cloud</strong> on your main device first, then try again.</p>` : `
+                            <p style="font-weight:600;color:red;font-size:15px;">❌ Could not load data</p>
+                            <p style="font-size:13px;color:#444;margin-top:10px;">${typeof err === 'string' ? err : (err.message || 'Unknown error')}</p>`}
+                        <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
+                            <button onclick="loadFromGoogleSheets();" class="btn" style="font-size:13px;">🔄 Try again</button>
+                            <button onclick="localStorage.removeItem('pbg_sheetId');loadFromGoogleSheets();"
+                                class="btn btn-secondary" style="font-size:13px;">Enter a different Sheet ID</button>
+                        </div>
+                    </div>`;
+                showToast('Could not load — see details in Backups tab', 'error');
             }
         }
 
